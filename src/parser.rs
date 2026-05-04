@@ -1,24 +1,5 @@
+use crate::ast::*;
 use crate::lexer::{Lexer, Token};
-
-#[derive(Debug, PartialEq, PartialOrd)]
-pub struct ListItem(Vec<BlockNode>); //TODO: check 
-
-#[derive(Debug, PartialEq, PartialOrd)]
-pub enum BlockNode {
-    Heading { level: u8, content: Vec<InlineNode> },
-    Paragraph(Vec<InlineNode>),
-    BlockQuote(Vec<BlockNode>),
-    OrderedList(Vec<ListItem>),
-    UnorderedList(Vec<ListItem>),
-}
-
-#[derive(Debug, PartialEq, PartialOrd)]
-pub enum InlineNode {
-    Text(String),
-    Bold(Vec<InlineNode>),
-    Italics(Vec<InlineNode>),
-    LineBreak,
-}
 
 pub struct Parser {
     tokens: Vec<Token>,
@@ -28,7 +9,7 @@ pub struct Parser {
 }
 
 impl Parser {
-    fn new(tokens: Vec<Token>) -> Parser {
+    pub fn new(tokens: Vec<Token>) -> Parser {
         Parser {
             tokens,
             position: 0,
@@ -37,13 +18,13 @@ impl Parser {
         }
     }
 
-    fn parse(&mut self) -> Vec<BlockNode> {
+    pub fn parse(&mut self) -> Vec<BlockNode> {
         let mut result = Vec::new();
         while !self.end() {
             match self.parse_block() {
                 Some(block) => result.push(block),
                 None => {
-                    unreachable!()
+                    continue
                 }
             }
         }
@@ -69,7 +50,10 @@ impl Parser {
                 None
             }
             Token::EOF => None,
-            Token::Equals | Token::Period | Token::Tab | Token::LineBreak => self.parse_paragraph(),
+            Token::Period => {
+                None
+            }
+            Token::Equals | Token::Tab  => self.parse_paragraph(),
         }
     }
     fn parse_unordered_list(&mut self) -> Option<BlockNode> {
@@ -83,7 +67,7 @@ impl Parser {
     }
 
     fn parse_unordered_list_at(&mut self, indent_level: usize) -> Option<BlockNode> {
-        let start = self.position;
+        let _start = self.position;
         let current_indent = self.indent_level;
         let mut items = Vec::new();
         loop {
@@ -168,7 +152,7 @@ impl Parser {
     fn parse_hash(&mut self) -> Option<BlockNode> {
         let start = self.position;
         let mut count = 0;
-        while (matches!(self.peek(), Token::Hash)) {
+        while matches!(self.peek(), Token::Hash) {
             count += 1;
             self.advance();
         }
@@ -194,7 +178,7 @@ impl Parser {
 
     fn parse_until_newline(&mut self) -> Vec<BlockNode> {
         let mut out = Vec::new();
-        while (!self.end() && !matches!(self.peek(), Token::NewLine | Token::LineBreak)) {
+        while !self.end() && !matches!(self.peek(), Token::NewLine | Token::LineBreak) {
             match self.parse_block() {
                 Some(result) => out.push(result),
                 None => panic!("check later"),
@@ -205,7 +189,7 @@ impl Parser {
 
     fn parse_inline_until_newline(&mut self) -> Vec<InlineNode> {
         let mut out = Vec::new();
-        while (!self.end() && !matches!(self.peek(), Token::NewLine | Token::LineBreak)) {
+        while !self.end() && !matches!(self.peek(), Token::NewLine | Token::LineBreak) {
             match self.parse_inline() {
                 Some(result) => out.push(result),
                 None => panic!("check later"),
