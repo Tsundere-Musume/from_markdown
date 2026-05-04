@@ -23,9 +23,7 @@ impl Parser {
         while !self.end() {
             match self.parse_block() {
                 Some(block) => result.push(block),
-                None => {
-                    continue
-                }
+                None => continue,
             }
         }
         result
@@ -35,8 +33,15 @@ impl Parser {
         match self.peek() {
             Token::Hash => self.parse_hash(),
             Token::Dash => self.parse_unordered_list(),
-            Token::Star | Token::LessThan | Token::GreaterThan | Token::Text(_) => {
-                self.parse_paragraph()
+            Token::Star | Token::LessThan | Token::GreaterThan => self.parse_paragraph(),
+            Token::Text(content) => {
+                if content.chars().all(|c| c.is_ascii_digit())
+                    && matches!(self.peek_next(), Token::Period)
+                {
+                    self.parse_ordered_list()
+                } else {
+                    self.parse_paragraph()
+                }
             }
             Token::NewLine | Token::LineBreak => {
                 self.indent_level = 0;
@@ -49,13 +54,77 @@ impl Parser {
                 self.consume();
                 None
             }
+            Token::Equals | Token::Tab | Token::Period => self.parse_paragraph(),
             Token::EOF => None,
-            Token::Period => {
-                None
-            }
-            Token::Equals | Token::Tab  => self.parse_paragraph(),
         }
     }
+
+    fn parse_ordered_list(&mut self) -> Option<BlockNode> {
+        let start = self.position;
+        let current_indent = self.indent_level;
+        self.consume();
+
+        if !matches!(self.peek_next(), Token::Text(s) if s.starts_with(' ') ) {
+            self.position = start;
+            self.parse_paragraph()
+        } else {
+            self.position = start;
+            self.parse_ordered_list_at(current_indent)
+        }
+    }
+
+    fn parse_ordered_list_at(&mut self, indent_level: usize) -> Option<BlockNode> {
+        let current_indent = self.indent_level;
+        let mut items = Vec::new();
+        loop {
+            let start = self.position;
+            if !matches!(self.peek(), Token::Text(content) if content.chars().all(|c| c.is_ascii_digit()))
+                || !matches!(self.peek_next(), Token::Period)
+            {
+                break;
+            }
+            self.consume();
+            self.consume();
+
+            if !matches!(self.peek(),  Token::Text(s) if s.starts_with(' ') ) {
+                self.position = start;
+                break;
+            }
+
+            if let Token::Text(content) = &mut self.tokens[self.position] {
+                *content = content.trim_start().to_string();
+                if content.is_empty() {
+                    self.consume();
+                }
+            }
+
+            let item = self.parse_list_item(current_indent).unwrap();
+            items.push(item);
+
+            match self.peek() {
+                Token::NewLine => {
+                    match self.peek_next() {
+                        Token::Indent(n) if *n == indent_level => self.consume(),
+                        _ if indent_level == 0 => {}
+                        _ => break,
+                    };
+                    self.consume();
+                }
+                Token::LineBreak => {
+                    self.consume();
+                    break;
+                }
+                _ => break,
+            };
+        }
+
+        if items.is_empty() {
+            None
+        } else {
+            Some(BlockNode::OrderedList(items))
+        }
+    }
+
     fn parse_unordered_list(&mut self) -> Option<BlockNode> {
         let current_indent = self.indent_level;
 
@@ -681,6 +750,118 @@ mod list_tests {
                 BlockNode::UnorderedList(vec![item(vec![paragraph(vec![txt("foo")])])]),
                 paragraph(vec![txt("bar")]),
             ]
+        );
+    }
+}
+
+#[cfg(test)]
+mod ordered_list_tests {
+    use super::*;
+
+    fn lex(input: &str) -> Vec<Token> {
+        let mut lexer = Lexer::new(input.to_string());
+        lexer.lex()
+    }
+
+    fn parse(src: &str) -> Vec<BlockNode> {
+        let tokens = lex(src);
+        Parser::new(tokens).parse()
+    }
+
+    fn txt(s: &str) -> InlineNode {
+        InlineNode::Text(s.to_string())
+    }
+
+    fn paragraph(nodes: Vec<InlineNode>) -> BlockNode {
+        BlockNode::Paragraph(nodes)
+    }
+
+    fn item(blocks: Vec<BlockNode>) -> ListItem {
+        ListItem(blocks)
+    }
+
+    // --- Basic Ordered Lists ---
+
+    #[test]
+    fn test_single_ordered_item() {
+        assert_eq!(
+            parse("1. foo"),
+            vec![BlockNode::OrderedList(vec![item(vec![paragraph(vec![
+                txt("foo")
+            ])])])]
+        );
+    }
+
+    #[test]
+    fn test_multiple_ordered_items() {
+        // Note: In Markdown, the numbers don't have to be sequential (1, 2, 3)
+        // but the parser should group them into one List.
+        assert_eq!(
+            parse("1. foo\n2. bar\n3. baz"),
+            vec![BlockNode::OrderedList(vec![
+                item(vec![paragraph(vec![txt("foo")])]),
+                item(vec![paragraph(vec![txt("bar")])]),
+                item(vec![paragraph(vec![txt("baz")])]),
+            ])]
+        );
+    }
+
+    #[test]
+    fn test_ordered_marker_without_space_is_paragraph() {
+        // "1.foo" is not a list item in standard Markdown; it needs a space.
+        assert_eq!(
+            parse("1.foo"),
+            vec![paragraph(vec![txt("1"), txt("."), txt("foo")])]
+        );
+    }
+
+    // --- Nesting ---
+
+    #[test]
+    fn test_nested_ordered_list() {
+        assert_eq!(
+            parse("1. foo\n  1. bar"),
+            vec![BlockNode::OrderedList(vec![item(vec![
+                paragraph(vec![txt("foo")]),
+                BlockNode::OrderedList(vec![item(vec![paragraph(vec![txt("bar")])])]),
+            ])])]
+        );
+    }
+
+    #[test]
+    fn test_mixed_list_nesting() {
+        // An unordered list inside an ordered list
+        assert_eq!(
+            parse("1. foo\n  - bar"),
+            vec![BlockNode::OrderedList(vec![item(vec![
+                paragraph(vec![txt("foo")]),
+                BlockNode::UnorderedList(vec![item(vec![paragraph(vec![txt("bar")])])]),
+            ])])]
+        );
+    }
+
+    // --- Boundaries ---
+
+    #[test]
+    fn test_ordered_list_interrupted_by_paragraph() {
+        assert_eq!(
+            parse("1. foo\n\nbar"),
+            vec![
+                BlockNode::OrderedList(vec![item(vec![paragraph(vec![txt("foo")])])]),
+                paragraph(vec![txt("bar")]),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_ordered_list_with_continuation_text() {
+        // Indented text on the next line belongs to the list item
+        assert_eq!(
+            parse("1. foo\n   bar"),
+            vec![BlockNode::OrderedList(vec![item(vec![
+                paragraph(vec![txt("foo")]),
+                paragraph(vec![txt("bar")]),
+            ])])]
         );
     }
 }
