@@ -33,7 +33,8 @@ impl Parser {
         match self.peek() {
             Token::Hash => self.parse_hash(),
             Token::Dash => self.parse_unordered_list(),
-            Token::Star | Token::LessThan | Token::GreaterThan => self.parse_paragraph(),
+            Token::Star | Token::LessThan => self.parse_paragraph(),
+            Token::GreaterThan => self.parse_paragraph(),
             Token::Text(content) => {
                 if content.chars().all(|c| c.is_ascii_digit())
                     && matches!(self.peek_next(), Token::Period)
@@ -57,6 +58,10 @@ impl Parser {
             Token::Equals | Token::Tab | Token::Period => self.parse_paragraph(),
             Token::EOF => None,
         }
+    }
+
+    fn parse_blockquote(&mut self) -> Option<BlockNode> {
+        todo!()
     }
 
     fn parse_ordered_list(&mut self) -> Option<BlockNode> {
@@ -192,6 +197,7 @@ impl Parser {
         if first_line.is_empty() {
             return None;
         }
+        // println!("{:#?}", first_line);
         blocks.extend(first_line);
 
         loop {
@@ -365,16 +371,43 @@ impl Parser {
 
     fn parse_paragraph(&mut self) -> Option<BlockNode> {
         let mut result = Vec::new();
-        while !self.end() && !matches!(self.peek(), Token::NewLine | Token::LineBreak) {
-            match self.parse_inline() {
-                Some(inline) => result.push(inline),
-                None => {
-                    self.valid = false;
-                    panic!("not sure")
-                }
+
+        loop {
+            result.extend(self.parse_inline_until_newline());
+
+            if self.end() || !matches!(self.peek(), Token::NewLine) {
+                break;
+            }
+
+            let start = self.position;
+            self.consume();
+
+            while matches!(self.peek(), Token::Indent(_)) {
+                self.consume();
+            }
+
+            if self.starts_block() {
+                self.position = start;
+                break;
             }
         }
+
         Some(BlockNode::Paragraph(result))
+    }
+
+    fn starts_block(&self) -> bool {
+        match self.peek() {
+            Token::Hash | Token::Dash | Token::GreaterThan | Token::LineBreak | Token::EOF => true,
+
+            Token::Text(content)
+                if content.chars().all(|c| c.is_ascii_digit())
+                    && matches!(self.peek_next(), Token::Period) =>
+            {
+                true
+            }
+
+            _ => false,
+        }
     }
 
     fn end(&self) -> bool {
@@ -700,10 +733,10 @@ mod list_tests {
         // second indented line that isn't a list marker becomes another paragraph
         assert_eq!(
             parse("- foo\n  bar"),
-            vec![BlockNode::UnorderedList(vec![item(vec![
-                paragraph(vec![txt("foo")]),
-                paragraph(vec![txt("bar")]),
-            ])])]
+            vec![BlockNode::UnorderedList(vec![item(vec![paragraph(vec![
+                txt("foo"),
+                txt("bar")
+            ]),])])]
         );
     }
 
@@ -746,10 +779,10 @@ mod list_tests {
         // second line at indent 0 is not part of the list item
         assert_eq!(
             parse("- foo\nbar"),
-            vec![
-                BlockNode::UnorderedList(vec![item(vec![paragraph(vec![txt("foo")])])]),
-                paragraph(vec![txt("bar")]),
-            ]
+            vec![BlockNode::UnorderedList(vec![item(vec![paragraph(vec![
+                txt("foo"),
+                txt("bar")
+            ])])]),]
         );
     }
 }
@@ -858,10 +891,10 @@ mod ordered_list_tests {
         // Indented text on the next line belongs to the list item
         assert_eq!(
             parse("1. foo\n   bar"),
-            vec![BlockNode::OrderedList(vec![item(vec![
-                paragraph(vec![txt("foo")]),
-                paragraph(vec![txt("bar")]),
-            ])])]
+            vec![BlockNode::OrderedList(vec![item(vec![paragraph(vec![
+                txt("foo"),
+                txt("bar")
+            ]),])])]
         );
     }
 }
