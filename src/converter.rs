@@ -1,7 +1,92 @@
 use crate::ast::*;
 
 pub fn to_html(ast: Vec<BlockNode>) -> String {
-    ast.into_iter().map(render_node).collect()
+    let body: String = ast.into_iter().map(render_node).collect();
+    format!(
+        r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+  :root {{
+    --bg:          #0d1117;
+    --surface:     #161b22;
+    --border:      #30363d;
+    --text:        #e6edf3;
+    --text-muted:  #8b949e;
+    --accent:      #58a6ff;
+    --code-bg:     #1f2428;
+    --quote-bar:   #3d444d;
+  }}
+
+  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+
+  body {{
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 16px;
+    line-height: 1.7;
+    max-width: 780px;
+    margin: 0 auto;
+    padding: 2rem 1.5rem;
+  }}
+
+  h1, h2, h3, h4, h5, h6 {{
+    color: var(--text);
+    font-weight: 600;
+    line-height: 1.25;
+    margin: 1.5rem 0 0.75rem;
+    padding-bottom: 0.3rem;
+    border-bottom: 1px solid var(--border);
+  }}
+  h1 {{ font-size: 2rem; }}
+  h2 {{ font-size: 1.5rem; }}
+  h3 {{ font-size: 1.25rem; }}
+  h4, h5, h6 {{ font-size: 1rem; border-bottom: none; }}
+
+  p {{
+    margin: 0.75rem 0;
+    color: var(--text);
+  }}
+
+  strong {{ color: var(--text); font-weight: 600; }}
+  em     {{ color: var(--text-muted); font-style: italic; }}
+
+  ul, ol {{
+    margin: 0.75rem 0;
+    padding-left: 1.5rem;
+  }}
+  li {{
+    margin: 0.25rem 0;
+    color: var(--text);
+  }}
+  li > ul, li > ol {{
+    margin: 0.25rem 0;
+  }}
+
+  blockquote {{
+    margin: 1rem 0;
+    padding: 0.5rem 1rem;
+    border-left: 4px solid var(--quote-bar);
+    background: var(--surface);
+    border-radius: 0 6px 6px 0;
+    color: var(--text-muted);
+  }}
+  blockquote blockquote {{
+    margin-top: 0.5rem;
+    border-left-color: var(--accent);
+  }}
+
+  br {{ display: block; margin: 0.25rem 0; }}
+</style>
+</head>
+<body>
+{body}
+</body>
+</html>"#
+    )
 }
 
 fn escape(text: &str) -> String {
