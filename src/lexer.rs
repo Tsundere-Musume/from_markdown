@@ -13,6 +13,10 @@ pub enum Token {
     Indent(usize),
     LineBreak,
     Text(String),
+    OpenBracket,
+    CloseBracket,
+    OpenParen,
+    CloseParen,
 }
 
 pub struct Lexer {
@@ -56,6 +60,10 @@ impl Lexer {
                 '-' => LexerOutput::Token(Token::Dash),
                 '<' => LexerOutput::Token(Token::LessThan),
                 '>' => LexerOutput::Token(Token::GreaterThan),
+                '[' => LexerOutput::Token(Token::OpenBracket),
+                ']' => LexerOutput::Token(Token::CloseBracket),
+                '(' => LexerOutput::Token(Token::OpenParen),
+                ')' => LexerOutput::Token(Token::CloseParen),
                 '.' => LexerOutput::Token(Token::Period),
                 '\n' => LexerOutput::Tokens(self.handle_newlines()),
                 '\t' => LexerOutput::Token(Token::Tab),
@@ -91,7 +99,7 @@ impl Lexer {
         let mut content = String::from(self.last);
         while let Some(char) = self.peek() {
             match char {
-                '#' | '*' | '\n' | '\t' | '=' | '-' | '<' | '>' | '.' => break,
+                '#' | '*' | '\n' | '\t' | '=' | '-' | '<' | '>' | '.' | '[' | ']' | '(' | ')' => break,
                 _ => {
                     content.push(char);
                     self.advance();
@@ -116,7 +124,7 @@ impl Lexer {
         loop {
             match self.peek() {
                 Some(' ') => spaces += 1,
-                Some('\t') => spaces += 4 - spaces % 4, 
+                Some('\t') => spaces += 4 - spaces % 4,
                 _ => break,
             };
             self.advance();
@@ -149,6 +157,10 @@ impl std::fmt::Display for Token {
             Token::Text(s) => s,
             Token::Indent(times) => &" ".repeat(*times),
             Token::LineBreak => "\n",
+            Token::OpenBracket => "[",
+            Token::CloseBracket => "]",
+            Token::OpenParen => "(",
+            Token::CloseParen => ")",
         };
         write!(f, "{s}")
     }
@@ -471,6 +483,249 @@ mod tests {
                 Token::Text("c".to_string()),
                 Token::NewLine,
                 Token::Text("d".to_string()),
+                Token::EOF,
+            ]
+        );
+    }
+}
+
+#[cfg(test)]
+mod link_tests {
+    use super::*;
+
+    fn lex(input: &str) -> Vec<Token> {
+        let mut lexer = Lexer::new(input.to_string());
+        lexer.lex()
+    }
+
+    // --- Basic structure ---
+
+    #[test]
+    fn test_simple_link_tokens() {
+        assert_eq!(
+            lex("[hello](https://example.com)"),
+            vec![
+                Token::OpenBracket,
+                Token::Text("hello".to_string()),
+                Token::CloseBracket,
+                Token::OpenParen,
+                Token::Text("https://example".to_string()),
+                Token::Period,
+                Token::Text("com".to_string()),
+                Token::CloseParen,
+                Token::EOF,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_empty_link_text() {
+        assert_eq!(
+            lex("[](https://example.com)"),
+            vec![
+                Token::OpenBracket,
+                Token::CloseBracket,
+                Token::OpenParen,
+                Token::Text("https://example".to_string()),
+                Token::Period,
+                Token::Text("com".to_string()),
+                Token::CloseParen,
+                Token::EOF,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_empty_href() {
+        assert_eq!(
+            lex("[hello]()"),
+            vec![
+                Token::OpenBracket,
+                Token::Text("hello".to_string()),
+                Token::CloseBracket,
+                Token::OpenParen,
+                Token::CloseParen,
+                Token::EOF,
+            ]
+        );
+    }
+
+    // --- Brackets and parens in isolation ---
+
+    #[test]
+    fn test_lone_open_bracket() {
+        assert_eq!(lex("["), vec![Token::OpenBracket, Token::EOF]);
+    }
+
+    #[test]
+    fn test_lone_close_bracket() {
+        assert_eq!(lex("]"), vec![Token::CloseBracket, Token::EOF]);
+    }
+
+    #[test]
+    fn test_lone_open_paren() {
+        assert_eq!(lex("("), vec![Token::OpenParen, Token::EOF]);
+    }
+
+    #[test]
+    fn test_lone_close_paren() {
+        assert_eq!(lex(")"), vec![Token::CloseParen, Token::EOF]);
+    }
+
+    #[test]
+    fn test_brackets_in_text() {
+        assert_eq!(
+            lex("hello [world] foo"),
+            vec![
+                Token::Text("hello ".to_string()),
+                Token::OpenBracket,
+                Token::Text("world".to_string()),
+                Token::CloseBracket,
+                Token::Text(" foo".to_string()),
+                Token::EOF,
+            ]
+        );
+    }
+
+    // --- Link with title ---
+
+    #[test]
+    fn test_link_with_title_tokens() {
+        assert_eq!(
+            lex(r#"[hello](https://example.com "my title")"#),
+            vec![
+                Token::OpenBracket,
+                Token::Text("hello".to_string()),
+                Token::CloseBracket,
+                Token::OpenParen,
+                Token::Text("https://example".to_string()),
+                Token::Period,
+                Token::Text(r#"com "my title""#.to_string()),
+                Token::CloseParen,
+                Token::EOF,
+            ]
+        );
+    }
+
+    // --- Nested brackets ---
+
+    #[test]
+    fn test_link_with_star_in_text() {
+        assert_eq!(
+            lex("[**bold**](url)"),
+            vec![
+                Token::OpenBracket,
+                Token::Star,
+                Token::Star,
+                Token::Text("bold".to_string()),
+                Token::Star,
+                Token::Star,
+                Token::CloseBracket,
+                Token::OpenParen,
+                Token::Text("url".to_string()),
+                Token::CloseParen,
+                Token::EOF,
+            ]
+        );
+    }
+
+    // --- Malformed links ---
+
+    #[test]
+    fn test_unclosed_bracket() {
+        assert_eq!(
+            lex("[hello"),
+            vec![
+                Token::OpenBracket,
+                Token::Text("hello".to_string()),
+                Token::EOF,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_bracket_without_paren() {
+        assert_eq!(
+            lex("[hello] world"),
+            vec![
+                Token::OpenBracket,
+                Token::Text("hello".to_string()),
+                Token::CloseBracket,
+                Token::Text(" world".to_string()),
+                Token::EOF,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_unclosed_paren() {
+        assert_eq!(
+            lex("[hello](url"),
+            vec![
+                Token::OpenBracket,
+                Token::Text("hello".to_string()),
+                Token::CloseBracket,
+                Token::OpenParen,
+                Token::Text("url".to_string()),
+                Token::EOF,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_link_with_newline_in_href() {
+        assert_eq!(
+            lex("[hello](url\nbroken)"),
+            vec![
+                Token::OpenBracket,
+                Token::Text("hello".to_string()),
+                Token::CloseBracket,
+                Token::OpenParen,
+                Token::Text("url".to_string()),
+                Token::NewLine,
+                Token::Text("broken".to_string()),
+                Token::CloseParen,
+                Token::EOF,
+            ]
+        );
+    }
+
+    // --- Link adjacent to other content ---
+
+    #[test]
+    fn test_link_followed_by_text() {
+        assert_eq!(
+            lex("[hi](url) world"),
+            vec![
+                Token::OpenBracket,
+                Token::Text("hi".to_string()),
+                Token::CloseBracket,
+                Token::OpenParen,
+                Token::Text("url".to_string()),
+                Token::CloseParen,
+                Token::Text(" world".to_string()),
+                Token::EOF,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_two_links() {
+        assert_eq!(
+            lex("[a](b)[c](d)"),
+            vec![
+                Token::OpenBracket,
+                Token::Text("a".to_string()),
+                Token::CloseBracket,
+                Token::OpenParen,
+                Token::Text("b".to_string()),
+                Token::CloseParen,
+                Token::OpenBracket,
+                Token::Text("c".to_string()),
+                Token::CloseBracket,
+                Token::OpenParen,
+                Token::Text("d".to_string()),
+                Token::CloseParen,
                 Token::EOF,
             ]
         );

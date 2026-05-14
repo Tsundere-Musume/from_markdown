@@ -16,4 +16,5 @@ pub enum InlineNode {
     Bold(Vec<InlineNode>),
     Italics(Vec<InlineNode>),
     LineBreak,
+    Link{href: String, title: Option<String>, children: Vec<InlineNode>}
 }

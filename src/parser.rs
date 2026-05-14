@@ -35,6 +35,7 @@ impl Parser {
             Token::Dash => self.parse_unordered_list(),
             Token::Star | Token::LessThan => self.parse_paragraph(),
             Token::GreaterThan => self.parse_blockquote(),
+            Token::OpenBracket => self.parse_paragraph(),
             Token::Text(content) => {
                 if content.chars().all(|c| c.is_ascii_digit())
                     && matches!(self.peek_next(), Token::Period)
@@ -57,6 +58,9 @@ impl Parser {
             }
             Token::Equals | Token::Tab | Token::Period => self.parse_paragraph(),
             Token::EOF => None,
+            Token::CloseBracket => self.parse_paragraph(),
+            Token::OpenParen => self.parse_paragraph(),
+            Token::CloseParen => self.parse_paragraph(),
         }
     }
 
@@ -184,6 +188,74 @@ impl Parser {
             }
         }
         count
+    }
+
+    fn parse_link(&mut self) -> Option<InlineNode> {
+        let start = self.position;
+        self.consume();
+
+        let children = self.parse_inline_until(|a, _| matches!(a, Token::CloseBracket));
+
+        if !matches!(self.peek(), Token::CloseBracket) {
+            self.position = start;
+            self.consume();
+            return Some(InlineNode::Text("[".into()));
+        }
+        self.consume();
+
+        if !matches!(self.peek(), Token::OpenParen) {
+            self.position = start;
+            self.consume();
+            return Some(InlineNode::Text("[".into()));
+        }
+        self.consume();
+
+        let mut title = None;
+        let mut href = String::new();
+
+        println!("hello world");
+        while !self.end()
+            && !matches!(
+                self.peek(),
+                Token::CloseParen | Token::NewLine | Token::LineBreak
+            )
+        {
+            match self.peek() {
+                Token::Text(s) => {
+                    let s = s.clone();
+                    if let Some((url, rest)) = s.split_once(' ') {
+                        href.push_str(url);
+
+                        let rest = rest.trim();
+                        if rest.starts_with('"') && rest.ends_with('"') {
+                            title = Some(rest.trim_matches('"').to_string())
+                        }
+                        self.consume();
+                        break;
+                    } else {
+                        href.push_str(&s);
+                        self.consume();
+                    }
+                }
+                Token::Period | Token::Dash | Token::Hash => {
+                    href.push_str(&self.advance().to_string());
+                }
+                _ => self.consume(),
+            }
+        }
+
+        if !matches!(self.peek(), Token::CloseParen) {
+            self.position = start;
+            self.consume();
+            return Some(InlineNode::Text("[".into()));
+        }
+        self.consume();
+
+        Some(InlineNode::Link {
+            href,
+            title,
+            children,
+        })
     }
 
     fn parse_ordered_list(&mut self) -> Option<BlockNode> {
@@ -424,6 +496,10 @@ impl Parser {
                 self.consume();
                 Some(InlineNode::LineBreak)
             }
+            Token::OpenBracket => self.parse_link(),
+            Token::CloseBracket | Token::OpenParen | Token::CloseParen => {
+                Some(InlineNode::Text(self.advance().to_string()))
+            }
         };
         out
     }
@@ -566,6 +642,7 @@ mod tests {
 
     fn parse_from_string(src: &str) -> Vec<BlockNode> {
         let tokens = lex(src);
+        println!("{:#?}", tokens);
         Parser::new(tokens).parse()
     }
     #[test]
@@ -694,6 +771,63 @@ mod tests {
             parse_from_string("****"),
             vec![BlockNode::Paragraph(vec![
                 InlineNode::Bold(vec![]) // Or txt("*"), txt("*"), txt("*"), txt("*") depending on your parser
+            ])]
+        );
+    }
+
+    #[test]
+    fn test_simple_link() {
+        assert_eq!(
+            parse_from_string("[hello](https://example.com)"),
+            vec![BlockNode::Paragraph(vec![InlineNode::Link {
+                href: "https://example.com".to_string(),
+                title: None,
+                children: vec![txt("hello")],
+            }])]
+        );
+    }
+
+    #[test]
+    fn test_link_with_title() {
+        assert_eq!(
+            parse_from_string(r#"[hello](https://example.com "my title")"#),
+            vec![BlockNode::Paragraph(vec![InlineNode::Link {
+                href: "https://example.com".to_string(),
+                title: Some("my title".to_string()),
+                children: vec![txt("hello")],
+            }])]
+        );
+    }
+
+    #[test]
+    fn test_link_with_bold_text() {
+        assert_eq!(
+            parse_from_string("[**bold**](https://example.com)"),
+            vec![BlockNode::Paragraph(vec![InlineNode::Link {
+                href: "https://example.com".to_string(),
+                title: None,
+                children: vec![InlineNode::Bold(vec![txt("bold")])],
+            }])]
+        );
+    }
+
+    #[test]
+    fn test_unclosed_bracket_is_literal() {
+        assert_eq!(
+            parse_from_string("[hello"),
+            vec![BlockNode::Paragraph(vec![txt("["), txt("hello"),])]
+        );
+    }
+
+    #[test]
+    fn test_bracket_without_paren_is_literal() {
+        assert_eq!(
+            parse_from_string("[hello] world"),
+            vec![BlockNode::Paragraph(vec![
+                txt("["),
+                txt("hello"),
+                txt("]"),
+                txt(" world"),
             ])]
         );
     }

@@ -16,6 +16,7 @@ pub fn to_html(ast: Vec<BlockNode>) -> String {
     --text:        #e6edf3;
     --text-muted:  #8b949e;
     --accent:      #58a6ff;
+    --accent-hover:#79c0ff;
     --code-bg:     #1f2428;
     --quote-bar:   #3d444d;
   }}
@@ -53,6 +54,38 @@ pub fn to_html(ast: Vec<BlockNode>) -> String {
 
   strong {{ color: var(--text); font-weight: 600; }}
   em     {{ color: var(--text-muted); font-style: italic; }}
+
+  a {{
+    color: var(--accent);
+    text-decoration: none;
+    border-bottom: 1px solid transparent;
+    transition: color 0.15s ease, border-color 0.15s ease;
+  }}
+  a:hover {{
+    color: var(--accent-hover);
+    border-bottom-color: var(--accent-hover);
+  }}
+  a:visited {{
+    color: var(--text-muted);
+  }}
+  a:visited:hover {{
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+  }}
+
+  /* links inside headings inherit heading size but keep accent color */
+  h1 a, h2 a, h3 a, h4 a, h5 a, h6 a {{
+    color: var(--accent);
+    border-bottom: none;
+  }}
+
+  /* links inside blockquotes are slightly dimmed */
+  blockquote a {{
+    color: var(--text-muted);
+  }}
+  blockquote a:hover {{
+    color: var(--accent);
+  }}
 
   ul, ol {{
     margin: 0.75rem 0;
@@ -164,6 +197,21 @@ fn render_inlines(nodes: Vec<InlineNode>) -> String {
                 output.push_str("</strong>");
             }
             InlineNode::LineBreak => output.push_str("<br>"),
+            InlineNode::Link {
+                href,
+                title,
+                children,
+            } => {
+                let title_attr = title
+                    .map(|t| format!(r#" title="{}""#, escape(&t)))
+                    .unwrap_or_default();
+                output.push_str(&format!(
+                    r#"<a href="{}"{}>{}</a>"#,
+                    escape(&href),
+                    title_attr,
+                    render_inlines(children)
+                ))
+            }
         }
     }
 
