@@ -16,7 +16,15 @@ fn render_node(node: BlockNode) -> String {
         BlockNode::Paragraph(inline_nodes) => {
             format!("<p>{}</p>", render_inlines(inline_nodes))
         }
-        BlockNode::BlockQuote(block_nodes) => todo!(),
+        BlockNode::BlockQuote(block_nodes) => {
+            let mut output = String::new();
+            output.push_str("<blockquote>");
+            for block in block_nodes {
+                output.push_str(&render_node(block));
+            }
+            output.push_str("</blockquote>");
+            output
+        }
         BlockNode::OrderedList(list_items) => {
             let mut output = String::new();
             output.push_str("<ol>");

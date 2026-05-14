@@ -34,7 +34,7 @@ impl Parser {
             Token::Hash => self.parse_hash(),
             Token::Dash => self.parse_unordered_list(),
             Token::Star | Token::LessThan => self.parse_paragraph(),
-            Token::GreaterThan => self.parse_paragraph(),
+            Token::GreaterThan => self.parse_blockquote(),
             Token::Text(content) => {
                 if content.chars().all(|c| c.is_ascii_digit())
                     && matches!(self.peek_next(), Token::Period)
@@ -61,7 +61,129 @@ impl Parser {
     }
 
     fn parse_blockquote(&mut self) -> Option<BlockNode> {
-        todo!()
+        self.parse_blockquote_at(1)
+    }
+
+    fn parse_blockquote_at(&mut self, depth: usize) -> Option<BlockNode> {
+        let mut blocks = vec![];
+
+        loop {
+            let gt_count = self.count_leading_gt();
+
+            if gt_count < depth {
+                break;
+            }
+
+            if gt_count > depth {
+                if let Some(inner) = self.parse_blockquote_at(depth + 1) {
+                    blocks.push(inner);
+                }
+                continue;
+            }
+
+            self.consume_gts(depth);
+
+            if let Token::Text(content) = &mut self.tokens[self.position] {
+                if content.starts_with(' ') {
+                    *content = content.trim_start().to_string();
+                    if content.is_empty() {
+                        self.consume();
+                    }
+                }
+            }
+
+            match self.peek() {
+                Token::EOF | Token::LineBreak => break,
+                _ if self.starts_block() => {
+                    if let Some(block) = self.parse_block() {
+                        blocks.push(block);
+                    }
+                }
+                _ => {
+                    let mut inline = self.parse_inline_until_newline();
+
+                    loop {
+                        if !matches!(self.peek(), Token::NewLine) {
+                            break;
+                        }
+
+                        self.consume();
+                        if self.count_leading_gt() != depth {
+                            break;
+                        }
+
+                        let saved = self.position;
+                        self.consume();
+                        self.consume_gts(depth);
+
+                        if let Token::Text(content) = &mut self.tokens[self.position] {
+                            if content.starts_with(' ') {
+                                *content = content.trim_start().to_string();
+                                if content.is_empty() {
+                                    self.consume();
+                                }
+                            }
+                        }
+
+                        if self.starts_block() {
+                            self.position = saved;
+                            break;
+                        }
+
+                        inline.extend(self.parse_inline_until_newline());
+                    }
+
+                    if !inline.is_empty() {
+                        blocks.push(BlockNode::Paragraph(inline));
+                    }
+                }
+            }
+
+            if matches!(self.peek(), Token::NewLine) {
+                self.consume();
+            }
+        }
+
+        if blocks.is_empty() {
+            None
+        } else {
+            Some(BlockNode::BlockQuote(blocks))
+        }
+    }
+
+    fn consume_gts(&mut self, count: usize) {
+        let mut consumed = 0;
+        while consumed < count {
+            match self.peek() {
+                Token::GreaterThan => {
+                    self.consume();
+                    consumed += 1;
+                }
+                Token::Text(s) if s.chars().all(|c| c == ' ') => {
+                    self.consume();
+                }
+                _ => break,
+            }
+        }
+    }
+
+    fn count_leading_gt(&self) -> usize {
+        let mut count = 0;
+        let mut pos = self.position;
+
+        while let Some(token) = self.tokens.get(pos) {
+            match token {
+                Token::GreaterThan => {
+                    count += 1;
+                    pos += 1;
+                }
+                Token::Text(s) if s.chars().all(|c| c == ' ' || c == '\t') => {
+                    pos += 1;
+                } // skip spaces between `>`s
+                _ => break,
+            }
+        }
+        count
     }
 
     fn parse_ordered_list(&mut self) -> Option<BlockNode> {
@@ -896,5 +1018,149 @@ mod ordered_list_tests {
                 txt("bar")
             ]),])])]
         );
+    }
+}
+
+#[cfg(test)]
+mod blockquote_tests {
+    use super::*;
+
+    fn lex(input: &str) -> Vec<Token> {
+        let mut lexer = Lexer::new(input.to_string());
+        lexer.lex()
+    }
+
+    fn parse(src: &str) -> Vec<BlockNode> {
+        Parser::new(lex(src)).parse()
+    }
+
+    fn txt(s: &str) -> InlineNode {
+        InlineNode::Text(s.to_string())
+    }
+
+    fn paragraph(nodes: Vec<InlineNode>) -> BlockNode {
+        BlockNode::Paragraph(nodes)
+    }
+
+    fn bq(blocks: Vec<BlockNode>) -> BlockNode {
+        BlockNode::BlockQuote(blocks)
+    }
+
+    // --- Basic ---
+
+    #[test]
+    fn test_single_line_blockquote() {
+        assert_eq!(parse("> foo"), vec![bq(vec![paragraph(vec![txt("foo")])])]);
+    }
+
+    #[test]
+    fn test_multiline_blockquote() {
+        assert_eq!(
+            parse("> foo\n> bar"),
+            vec![bq(vec![paragraph(vec![txt("foo"), txt("bar")]),])]
+        );
+    }
+
+    #[test]
+    fn test_blockquote_without_space_still_parses() {
+        // `>foo` with no space — still valid
+        assert_eq!(parse(">foo"), vec![bq(vec![paragraph(vec![txt("foo")])])]);
+    }
+
+    // --- Nested ---
+
+    #[test]
+    fn test_nested_blockquote() {
+        assert_eq!(
+            parse("> > nested"),
+            vec![bq(vec![bq(vec![paragraph(vec![txt("nested")])])])]
+        );
+    }
+
+    #[test]
+    fn test_three_levels_deep() {
+        assert_eq!(
+            parse("> > > deep"),
+            vec![bq(vec![bq(vec![bq(vec![paragraph(vec![txt("deep")])])])])]
+        );
+    }
+
+    #[test]
+    fn test_outer_then_nested_then_outer() {
+        // the critical case — inner must not steal the last line
+        assert_eq!(
+            parse("> outer\n> > nested\n> back"),
+            vec![bq(vec![
+                paragraph(vec![txt("outer")]),
+                bq(vec![paragraph(vec![txt("nested")])]),
+                paragraph(vec![txt("back")]),
+            ])]
+        );
+    }
+
+    // --- Block content inside ---
+
+    #[test]
+    fn test_blockquote_with_heading() {
+        assert_eq!(
+            parse("> ## heading"),
+            vec![bq(vec![BlockNode::Heading {
+                level: 2,
+                content: vec![txt("heading")],
+            }])]
+        );
+    }
+
+    #[test]
+    fn test_blockquote_with_list() {
+        assert_eq!(
+            parse("> - item"),
+            vec![bq(vec![BlockNode::UnorderedList(vec![ListItem(vec![
+                paragraph(vec![txt("item")])
+            ])])])]
+        );
+    }
+
+    #[test]
+    fn test_blockquote_with_bold() {
+        assert_eq!(
+            parse("> **bold**"),
+            vec![bq(vec![paragraph(vec![InlineNode::Bold(vec![txt(
+                "bold"
+            )])])])]
+        );
+    }
+
+    // --- Boundaries ---
+
+    #[test]
+    fn test_blockquote_ends_at_blank_line() {
+        assert_eq!(
+            parse("> foo\n\nbar"),
+            vec![
+                bq(vec![paragraph(vec![txt("foo")])]),
+                paragraph(vec![txt("bar")]),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_blockquote_followed_by_heading() {
+        assert_eq!(
+            parse("> foo\n## heading"),
+            vec![
+                bq(vec![paragraph(vec![txt("foo")])]),
+                BlockNode::Heading {
+                    level: 2,
+                    content: vec![txt("heading")]
+                },
+            ]
+        );
+    }
+    #[test]
+    fn test_empty_blockquote_line() {
+        // `>` with nothing after — nothing to render
+        let result = parse(">");
+        assert!(result.is_empty() || matches!(result[0], BlockNode::BlockQuote(_)));
     }
 }
