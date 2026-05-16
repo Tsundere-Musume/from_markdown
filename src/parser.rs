@@ -36,6 +36,7 @@ impl Parser {
             Token::Star | Token::LessThan => self.parse_paragraph(),
             Token::GreaterThan => self.parse_blockquote(),
             Token::OpenBracket => self.parse_paragraph(),
+            Token::Backtick => self.parse_backtick(),
             Token::Text(content) => {
                 if content.chars().all(|c| c.is_ascii_digit())
                     && matches!(self.peek_next(), Token::Period)
@@ -484,7 +485,7 @@ impl Parser {
             Token::LessThan => self.parse_linebreak(),
             Token::Star => self.parse_star(),
             Token::NewLine => Some(InlineNode::Text('\n'.into())),
-
+            Token::Backtick => self.parse_inline_code(),
             Token::EOF => None,
             // _ => todo!("implemente more inline"),
             Token::Indent(count) => {
@@ -593,9 +594,112 @@ impl Parser {
         Some(BlockNode::Paragraph(result))
     }
 
+    fn parse_inline_code(&mut self) -> Option<InlineNode> {
+        let start = self.position;
+        let count = self.count_leading_backticks();
+
+        self.consume_backticks(count);
+        let mut code = String::new();
+        loop {
+            match self.peek() {
+                Token::EOF | Token::NewLine | Token::LineBreak => {
+                    self.position = start;
+                    self.consume();
+                    return Some(InlineNode::Text("`".to_string()));
+                }
+                Token::Backtick if self.count_leading_backticks() == count => {
+                    self.consume_backticks(count);
+                    break;
+                }
+                t => {
+                    code.push_str(&t.to_string());
+                    self.consume();
+                }
+            }
+        }
+
+        Some(InlineNode::Code(code))
+    }
+
+    fn parse_backtick(&mut self) -> Option<BlockNode> {
+        let start = self.position;
+        let opening = self.count_leading_backticks();
+
+        if opening < 3 {
+            return self.parse_paragraph();
+        }
+        self.consume_backticks(opening);
+
+        let language = match self.peek() {
+            Token::Text(s) => {
+                let lang = s.trim().to_string();
+                self.consume();
+                Some(lang)
+            }
+            _ => None,
+        };
+
+        while !matches!(self.peek(), Token::NewLine | Token::EOF) {
+            self.consume();
+        }
+
+        if !matches!(self.peek(), Token::NewLine) {
+            self.position = start;
+            return self.parse_paragraph();
+        }
+        self.consume();
+
+        let mut code = String::new();
+        loop {
+            match self.peek() {
+                Token::EOF => {
+                    self.position = start;
+                    return self.parse_paragraph();
+                }
+                Token::Backtick if self.count_leading_backticks() >= opening => {
+                    self.consume_backticks(opening);
+                    while !matches!(self.peek(), Token::NewLine | Token::EOF) {
+                        self.consume();
+                    }
+                    break;
+                }
+                t => {
+                    code.push_str(&t.to_string());
+                    self.consume();
+                }
+            }
+        }
+
+        Some(BlockNode::CodeBlock { language, code })
+    }
+
+    fn consume_backticks(&mut self, count: usize) -> bool {
+        let mut count = count;
+        let start = self.position;
+        while count > 0 {
+            if !matches!(self.peek(), Token::Backtick) {
+                self.position = start;
+                return false;
+            }
+            self.consume();
+            count -= 1;
+        }
+        true
+    }
+
+    fn count_leading_backticks(&self) -> usize {
+        let mut count = 0;
+        let mut pos = self.position;
+        while matches!(self.tokens.get(pos), Some(Token::Backtick)) {
+            count += 1;
+            pos += 1;
+        }
+        count
+    }
+
     fn starts_block(&self) -> bool {
         match self.peek() {
-            Token::Hash | Token::Dash | Token::GreaterThan | Token::LineBreak | Token::EOF => true,
+            Token::Hash | Token::Dash | Token::GreaterThan | Token::LineBreak | Token::EOF | Token::Backtick => true,
 
             Token::Text(content)
                 if content.chars().all(|c| c.is_ascii_digit())
@@ -1296,5 +1400,67 @@ mod blockquote_tests {
         // `>` with nothing after — nothing to render
         let result = parse(">");
         assert!(result.is_empty() || matches!(result[0], BlockNode::BlockQuote(_)));
+    }
+}
+
+#[cfg(test)]
+mod codeblock_tests {
+    use super::*;
+    fn lex(input: &str) -> Vec<Token> {
+        let mut lexer = Lexer::new(input.to_string());
+        lexer.lex()
+    }
+
+    fn parse_from_string(src: &str) -> Vec<BlockNode> {
+        Parser::new(lex(src)).parse()
+    }
+    #[test]
+    fn test_simple_codeblock() {
+        assert_eq!(
+            parse_from_string("```\nhello\n```"),
+            vec![BlockNode::CodeBlock {
+                language: None,
+                code: "hello\n".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn test_codeblock_with_language() {
+        assert_eq!(
+            parse_from_string("```rust\nlet x = 1;\n```"),
+            vec![BlockNode::CodeBlock {
+                language: Some("rust".to_string()),
+                code: "let x = 1;\n".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn test_codeblock_preserves_symbols() {
+        assert_eq!(
+            parse_from_string("```\n# not a heading\n**not bold**\n```"),
+            vec![BlockNode::CodeBlock {
+                language: None,
+                code: "# not a heading\n**not bold**\n".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn test_unclosed_fence_is_paragraph() {
+        let result = parse_from_string("```\nhello");
+        assert!(matches!(result[0], BlockNode::Paragraph(_)));
+    }
+
+    #[test]
+    fn test_codeblock_multiline() {
+        assert_eq!(
+            parse_from_string("```\nline1\nline2\nline3\n```"),
+            vec![BlockNode::CodeBlock {
+                language: None,
+                code: "line1\nline2\nline3\n".to_string(),
+            }]
+        );
     }
 }

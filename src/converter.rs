@@ -113,6 +113,36 @@ pub fn to_html(ast: Vec<BlockNode>) -> String {
   }}
 
   br {{ display: block; margin: 0.25rem 0; }}
+pre {{
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+    overflow-x: auto;
+    margin: 1rem 0;
+    line-height: 1.5;
+}}
+
+pre code {{
+    font-family: "Cascadia Code", "Fira Code", Consolas, "Courier New", monospace;
+    font-size: 0.875rem;
+    color: var(--text);
+    background: none;
+    border: none;
+    padding: 0;
+    border-radius: 0;
+}}
+
+/* inline code — different from block code */
+code {{
+    font-family: "Cascadia Code", "Fira Code", Consolas, "Courier New", monospace;
+    font-size: 0.875em;
+    background: var(--code-bg);
+    color: var(--accent);
+    padding: 0.15em 0.4em;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+}}
 </style>
 </head>
 <body>
@@ -168,6 +198,10 @@ fn render_node(node: BlockNode) -> String {
         BlockNode::Heading { level, content } => {
             format!("<h{0}>{1}</h{0}>", level, render_inlines(content))
         }
+        BlockNode::CodeBlock {
+            language: _language,
+            code,
+        } => format!("<pre><code>{}</code></pre>", escape(&code)),
     };
     node_str
 }
@@ -212,6 +246,7 @@ fn render_inlines(nodes: Vec<InlineNode>) -> String {
                     render_inlines(children)
                 ))
             }
+            InlineNode::Code(s) => output.push_str(&format!("<code>{}</code>", escape(&s))),
         }
     }
 

@@ -8,6 +8,7 @@ pub enum BlockNode {
     BlockQuote(Vec<BlockNode>),
     OrderedList(Vec<ListItem>),
     UnorderedList(Vec<ListItem>),
+    CodeBlock{language: Option<String>, code: String}
 }
 
 #[derive(Debug, PartialEq, PartialOrd)]
@@ -16,5 +17,6 @@ pub enum InlineNode {
     Bold(Vec<InlineNode>),
     Italics(Vec<InlineNode>),
     LineBreak,
-    Link{href: String, title: Option<String>, children: Vec<InlineNode>}
+    Link{href: String, title: Option<String>, children: Vec<InlineNode>},
+    Code(String),
 }

@@ -29,7 +29,14 @@ hello world 1. is this real
 > hello
 
 [hellow **world**](https://github.com/Tsundere-Musume "github")
+
+```rust
+    hello world
+    new world
+```
+This is an `inline code` and ``block``.
 "#;
+
     let html = to_html(md);
     println!("{}", html);
 

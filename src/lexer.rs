@@ -17,6 +17,7 @@ pub enum Token {
     CloseBracket,
     OpenParen,
     CloseParen,
+    Backtick,
 }
 
 pub struct Lexer {
@@ -52,6 +53,8 @@ impl Lexer {
     }
 
     fn next(&mut self) -> Option<LexerOutput> {
+        //NOTE: Remember to add the token to the get_text function as well when introducting a new
+        //lexeme
         if let Some(char) = self.advance() {
             let token = match char {
                 '#' => LexerOutput::Token(Token::Hash),
@@ -65,6 +68,7 @@ impl Lexer {
                 '(' => LexerOutput::Token(Token::OpenParen),
                 ')' => LexerOutput::Token(Token::CloseParen),
                 '.' => LexerOutput::Token(Token::Period),
+                '`' => LexerOutput::Token(Token::Backtick),
                 '\n' => LexerOutput::Tokens(self.handle_newlines()),
                 '\t' => LexerOutput::Token(Token::Tab),
                 _ => LexerOutput::Token(self.get_text()),
@@ -99,7 +103,8 @@ impl Lexer {
         let mut content = String::from(self.last);
         while let Some(char) = self.peek() {
             match char {
-                '#' | '*' | '\n' | '\t' | '=' | '-' | '<' | '>' | '.' | '[' | ']' | '(' | ')' => break,
+                '#' | '*' | '\n' | '\t' | '=' | '-' | '<' | '>' | '.' | '[' | ']' | '(' | ')'
+                | '`' => break,
                 _ => {
                     content.push(char);
                     self.advance();
@@ -159,6 +164,7 @@ impl std::fmt::Display for Token {
             Token::LineBreak => "\n",
             Token::OpenBracket => "[",
             Token::CloseBracket => "]",
+            Token::Backtick => "`",
             Token::OpenParen => "(",
             Token::CloseParen => ")",
         };
