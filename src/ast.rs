@@ -18,5 +18,6 @@ pub enum InlineNode {
     Italics(Vec<InlineNode>),
     LineBreak,
     Link{href: String, title: Option<String>, children: Vec<InlineNode>},
+    Image{src: String, alt: String, title: Option<String>},
     Code(String),
 }

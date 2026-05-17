@@ -18,6 +18,7 @@ pub enum Token {
     OpenParen,
     CloseParen,
     Backtick,
+    Bang,
 }
 
 pub struct Lexer {
@@ -69,6 +70,7 @@ impl Lexer {
                 ')' => LexerOutput::Token(Token::CloseParen),
                 '.' => LexerOutput::Token(Token::Period),
                 '`' => LexerOutput::Token(Token::Backtick),
+                '!' => LexerOutput::Token(Token::Bang),
                 '\n' => LexerOutput::Tokens(self.handle_newlines()),
                 '\t' => LexerOutput::Token(Token::Tab),
                 _ => LexerOutput::Token(self.get_text()),
@@ -103,7 +105,7 @@ impl Lexer {
         let mut content = String::from(self.last);
         while let Some(char) = self.peek() {
             match char {
-                '#' | '*' | '\n' | '\t' | '=' | '-' | '<' | '>' | '.' | '[' | ']' | '(' | ')'
+                '#' | '*' | '\n' | '\t' | '=' | '-' | '<' | '>' | '.' | '[' | ']' | '(' | ')' | '!'
                 | '`' => break,
                 _ => {
                     content.push(char);
@@ -167,6 +169,7 @@ impl std::fmt::Display for Token {
             Token::Backtick => "`",
             Token::OpenParen => "(",
             Token::CloseParen => ")",
+            Token::Bang => "!",
         };
         write!(f, "{s}")
     }

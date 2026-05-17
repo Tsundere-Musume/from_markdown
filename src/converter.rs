@@ -143,6 +143,15 @@ code {{
     border-radius: 4px;
     border: 1px solid var(--border);
 }}
+
+img {{
+    max-width: 100%;
+    height: auto;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    margin: 0.75rem 0;
+    display: block;
+}}
 </style>
 </head>
 <body>
@@ -247,6 +256,17 @@ fn render_inlines(nodes: Vec<InlineNode>) -> String {
                 ))
             }
             InlineNode::Code(s) => output.push_str(&format!("<code>{}</code>", escape(&s))),
+            InlineNode::Image { src, alt, title } => {
+                let title_attr = title
+                    .map(|t| format!(r#" title="{}""#, escape(&t)))
+                    .unwrap_or_default();
+                output.push_str(&format!(
+                    r#"<img src="{}" alt="{}"{}>"#,
+                    escape(&src),
+                    escape(&alt),
+                    title_attr,
+                ))
+            }
         }
     }
 

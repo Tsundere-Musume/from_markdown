@@ -37,6 +37,7 @@ impl Parser {
             Token::GreaterThan => self.parse_blockquote(),
             Token::OpenBracket => self.parse_paragraph(),
             Token::Backtick => self.parse_backtick(),
+            Token::Bang => self.parse_paragraph(),
             Token::Text(content) => {
                 if content.chars().all(|c| c.is_ascii_digit())
                     && matches!(self.peek_next(), Token::Period)
@@ -501,8 +502,86 @@ impl Parser {
             Token::CloseBracket | Token::OpenParen | Token::CloseParen => {
                 Some(InlineNode::Text(self.advance().to_string()))
             }
+            Token::Bang => self.parse_image(),
         };
         out
+    }
+
+    fn parse_image(&mut self) -> Option<InlineNode> {
+        let start = self.position;
+
+        self.consume();
+        if !matches!(self.peek(), Token::OpenBracket) {
+            return Some(InlineNode::Text("!".to_string()));
+        }
+        self.consume();
+
+        let mut alt = String::new();
+        loop {
+            match self.peek() {
+                Token::CloseBracket | Token::EOF | Token::NewLine => break,
+                token => {
+                    alt.push_str(&token.to_string());
+                    self.consume();
+                }
+            }
+        }
+
+        if !matches!(self.peek(), Token::CloseBracket) {
+            self.position = start;
+            self.consume();
+            return Some(InlineNode::Text("!".into()));
+        }
+        self.consume();
+
+        if !matches!(self.peek(), Token::OpenParen) {
+            self.position = start;
+            self.consume();
+            return Some(InlineNode::Text("!".into()));
+        }
+        self.consume();
+
+        let mut title = None;
+        let mut src = String::new();
+
+        while !self.end()
+            && !matches!(
+                self.peek(),
+                Token::CloseParen | Token::NewLine | Token::LineBreak
+            )
+        {
+            match self.peek() {
+                Token::Text(s) => {
+                    let s = s.clone();
+                    if let Some((url, rest)) = s.split_once(' ') {
+                        src.push_str(url);
+
+                        let rest = rest.trim();
+                        if rest.starts_with('"') && rest.ends_with('"') {
+                            title = Some(rest.trim_matches('"').to_string())
+                        }
+                        self.consume();
+                        break;
+                    } else {
+                        src.push_str(&s);
+                        self.consume();
+                    }
+                }
+                Token::Period | Token::Dash | Token::Hash => {
+                    src.push_str(&self.advance().to_string());
+                }
+                _ => self.consume(),
+            }
+        }
+
+        if !matches!(self.peek(), Token::CloseParen) {
+            self.position = start;
+            self.consume();
+            return Some(InlineNode::Text("!".into()));
+        }
+        self.consume();
+
+        Some(InlineNode::Image { src, alt, title })
     }
 
     fn parse_linebreak(&mut self) -> Option<InlineNode> {
@@ -699,7 +778,12 @@ impl Parser {
 
     fn starts_block(&self) -> bool {
         match self.peek() {
-            Token::Hash | Token::Dash | Token::GreaterThan | Token::LineBreak | Token::EOF | Token::Backtick => true,
+            Token::Hash
+            | Token::Dash
+            | Token::GreaterThan
+            | Token::LineBreak
+            | Token::EOF
+            | Token::Backtick => true,
 
             Token::Text(content)
                 if content.chars().all(|c| c.is_ascii_digit())
@@ -932,6 +1016,67 @@ mod tests {
                 txt("hello"),
                 txt("]"),
                 txt(" world"),
+            ])]
+        );
+    }
+
+    #[test]
+    fn test_simple_image() {
+        assert_eq!(
+            parse_from_string("![alt](image.png)"),
+            vec![BlockNode::Paragraph(vec![InlineNode::Image {
+                src: "image.png".to_string(),
+                alt: "alt".to_string(),
+                title: None,
+            }])]
+        );
+    }
+
+    #[test]
+    fn test_image_with_title() {
+        assert_eq!(
+            parse_from_string(r#"![alt](image.png "my title")"#),
+            vec![BlockNode::Paragraph(vec![InlineNode::Image {
+                src: "image.png".to_string(),
+                alt: "alt".to_string(),
+                title: Some("my title".to_string()),
+            }])]
+        );
+    }
+
+    #[test]
+    fn test_image_empty_alt() {
+        assert_eq!(
+            parse_from_string("![](image.png)"),
+            vec![BlockNode::Paragraph(vec![InlineNode::Image {
+                src: "image.png".to_string(),
+                alt: "".to_string(),
+                title: None,
+            }])]
+        );
+    }
+
+    #[test]
+    fn test_bang_without_bracket_is_literal() {
+        assert_eq!(
+            parse_from_string("!hello"),
+            vec![BlockNode::Paragraph(vec![txt("!"), txt("hello"),])]
+        );
+    }
+
+    #[test]
+    fn test_unclosed_image_is_literal() {
+        assert_eq!(
+            parse_from_string("![alt](image.png"),
+            vec![BlockNode::Paragraph(vec![
+                txt("!"),
+                txt("["),
+                txt("alt"),
+                txt("]"),
+                txt("("),
+                txt("image"),
+                txt("."),
+                txt("png"),
             ])]
         );
     }

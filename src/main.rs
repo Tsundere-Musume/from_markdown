@@ -35,6 +35,8 @@ hello world 1. is this real
     new world
 ```
 This is an `inline code` and ``block``.
+
+![A mushroom-head robot drinking bubble tea](https://raw.githubusercontent.com/Codecademy/docs/main/media/codey.jpg)
 "#;
 
     let html = to_html(md);
